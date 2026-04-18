@@ -1,1 +1,51 @@
+# ==========================================
+# Pastas de Compilação e Build (CMake)
+# ==========================================
 build/
+build_web/
+_deps/
+out/
+bin/
+CMakeCache.txt
+CMakeFiles/
+Makefile
+*.cmake
+
+# ==========================================
+# Arquivos Compilados (Web / Emscripten)
+# ==========================================
+# (Caso algum vaze para fora da pasta build)
+*.wasm
+*.data
+*.js
+*.html
+
+# ==========================================
+# Arquivos Compilados (Desktop / Nativos)
+# ==========================================
+*.o
+*.obj
+*.exe
+*.dll
+*.lib
+*.a
+
+# ==========================================
+# Configurações Locais de IDE (VS Code)
+# ==========================================
+.vscode/
+*.suo
+*.sln
+
+# ==========================================
+# Arquivos de Sistema Operacional
+# ==========================================
+Thumbs.db
+.DS_Store
+
+# ==========================================
+# Diretórios de Usuário
+# ==========================================
+# Ignora tudo dentro de user_assets, mas mantém a pasta
+user_assets/*
+!user_assets/.gitkeep

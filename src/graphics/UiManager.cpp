@@ -1,4 +1,8 @@
+#ifdef __EMSCRIPTEN__
+#include <GLES3/gl3.h>
+#else
 #include <glad/glad.h>
+#endif
 #include <stb_image.h>
 #include "graphics/UiManager.h"
 #include "graphics/Primitives.h"
@@ -13,9 +17,12 @@
 #include "graphics/IconsFontAwesome7.h"
 #include <fstream>
 #include <iomanip>
+#include <string>
+
+#ifndef __EMSCRIPTEN__
 #include <windows.h>
 #include <commdlg.h>
-#include <string>
+#endif
 
 namespace fs = std::filesystem;
 
@@ -36,30 +43,32 @@ double modulo(double x, double y) {
 }
 
 std::string OpenFileDialog(const char* filter = "Arquivos de Cena (*.json)\0*.json\0Todos os Arquivos (*.*)\0*.*\0") {
+#ifndef __EMSCRIPTEN__
+    // --- CÓDIGO ORIGINAL DO WINDOWS ---
     OPENFILENAMEA ofn;
     CHAR szFile[260] = {0};
 
     ZeroMemory(&ofn, sizeof(OPENFILENAME));
     ofn.lStructSize = sizeof(OPENFILENAME);
-    ofn.hwndOwner = NULL; // Se você tiver o HWND da janela GLFW, pode colocar aqui, mas NULL funciona!
+    ofn.hwndOwner = NULL;
     ofn.lpstrFile = szFile;
     ofn.nMaxFile = sizeof(szFile);
-    // Filtro para mostrar apenas arquivos .json e pastas
     ofn.lpstrFilter = filter;
     ofn.nFilterIndex = 1;
     ofn.lpstrFileTitle = NULL;
     ofn.nMaxFileTitle = 0;
     ofn.lpstrInitialDir = NULL;
-    
-    // OFN_NOCHANGEDIR é VITAL para Motores Gráficos! 
-    // Impede que o Windows mude o diretório de trabalho da sua engine (o que faria as texturas pararem de carregar).
     ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
 
     if (GetOpenFileNameA(&ofn) == TRUE) {
         return std::string(ofn.lpstrFile);
     }
-    
-    return ""; // Retorna vazio se o usuário clicar em "Cancelar"
+    return "";
+#else
+    // --- CÓDIGO DA WEB ---
+    std::cout << "[Web] O pop-up nativo de arquivos nao e suportado no navegador!" << std::endl;
+    return ""; 
+#endif
 }
 
 static unsigned int CarregarTexturaDoArquivo(const char* path, bool isSkybox = false) {
@@ -165,7 +174,11 @@ UIManager::UIManager(GLFWwindow* window) {
 
     ImGui::StyleColorsDark();
     ImGui_ImplGlfw_InitForOpenGL(window, true);
+    #ifdef __EMSCRIPTEN__
+    ImGui_ImplOpenGL3_Init("#version 300 es");
+    #else
     ImGui_ImplOpenGL3_Init("#version 330 core");
+    #endif
 }
 
 UIManager::~UIManager() {

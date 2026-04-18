@@ -3,7 +3,6 @@
 // - Criar uma classe "Renderer" para lidar com a configuração do OpenGL, shaders e renderização em geral
 // - Criar uma classe "InputManager" para lidar com o teclado e mouse
 
-#include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <iostream>
 #include "graphics/Shader.h"
@@ -19,6 +18,20 @@
 #include "scene/Scene.h"
 #include "graphics/TextureLoader.h"
 #include <filesystem>
+#include <functional> 
+#include <imgui.h>
+
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#include <emscripten/html5.h>
+#include <GLES3/gl3.h>
+
+// Isso faz o compilador apagar qualquer chamada de glPolygonMode na Web!
+#define glPolygonMode(face, mode) 
+#define GL_LINE 0
+#else
+#include <glad/glad.h>
+#endif
 
 namespace fs = std::filesystem;
 
@@ -29,6 +42,7 @@ Camera camera(glm::vec3(0.0f, 0.0f, 3.0f));
 float lastX = 800.0f / 2.0;
 float lastY = 600.0f / 2.0;
 bool firstMouse = true;
+bool isDragging = false;
 
 // Variáveis de tempo (DeltaTime garante que a velocidade seja a mesma em qualquer PC)
 float deltaTime = 0.0f; 
@@ -37,8 +51,23 @@ float lastFrame = 0.0f;
 bool uiMode = false; // Começa no modo Câmera (falso)
 bool tabKeyPressed = false; // Para evitar que a tecla ative várias vezes num único clique
 
+void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
+    if (button == GLFW_MOUSE_BUTTON_RIGHT) {
+        if (action == GLFW_PRESS) {
+            isDragging = true;
+            firstMouse = true; // Previne o pulo inicial
+        } else if (action == GLFW_RELEASE) {
+            isDragging = false;
+        }
+    }
+}
+
 void mouse_callback(GLFWwindow* window, double xposIn, double yposIn) {
-    if (uiMode) return;
+    // Só ignora a UI se estivermos apenas passeando com o mouse
+    if (!isDragging && ImGui::GetIO().WantCaptureMouse) return;
+
+    // Se não estivermos segurando o botão, não faz nada
+    if (!isDragging) return; 
 
     float xpos = static_cast<float>(xposIn);
     float ypos = static_cast<float>(yposIn);
@@ -50,36 +79,21 @@ void mouse_callback(GLFWwindow* window, double xposIn, double yposIn) {
     }
 
     float xoffset = xpos - lastX;
-    float yoffset = lastY - ypos; // Invertido: coordenadas Y vão de baixo para cima no OpenGL
+    float yoffset = lastY - ypos; 
 
     lastX = xpos;
     lastY = ypos;
     
-    camera.ProcessMouseMovement(xoffset, yoffset);
+    camera.ProcessMouseMovement(xoffset*2.0f, yoffset*2.0f);
 }
 
 void processInput(GLFWwindow *window) {
+    // Tecla ESC para sair (útil no Desktop)
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
 
-    // Lógica de Toggle (Alternar) com a tecla TAB
-    if (glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS) {
-        if (!tabKeyPressed) {
-            uiMode = !uiMode; // Inverte o modo
-            if (uiMode) {
-                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL); // Solta o mouse
-            } else {
-                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED); // Prende o mouse
-                firstMouse = true; // Evita um "pulo" brusco da câmera ao voltar
-            }
-            tabKeyPressed = true;
-        }
-    } else {
-        tabKeyPressed = false; // Reseta quando a tecla é solta
-    }
-
-    // Só move a câmera pelo teclado se NÃO estivermos no modo UI
-    if (!uiMode) {
+    // Só permite o WASD se o usuário NÃO estiver digitando num campo de texto da UI
+    if (!ImGui::GetIO().WantCaptureKeyboard) {
         if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) camera.ProcessKeyboard(FORWARD, deltaTime);
         if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) camera.ProcessKeyboard(BACKWARD, deltaTime);
         if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) camera.ProcessKeyboard(LEFT, deltaTime);
@@ -90,26 +104,45 @@ void processInput(GLFWwindow *window) {
 }
 
 void drop_callback(GLFWwindow* window, int count, const char** paths) {
-    SceneState* state = static_cast<SceneState*>(glfwGetWindowUserPointer(window));
-
-    std::string targetDir = state->currentProjectPath.empty() ? "./user_assets" : state->currentProjectPath + "/user_assets";
-    
-    if (!fs::exists(targetDir)) {
-        fs::create_directories(targetDir);
+#ifndef __EMSCRIPTEN__
+    // Garante que a pasta existe (CÓDIGO ORIGINAL DESKTOP)
+    if (!fs::exists("./user_assets")) {
+        fs::create_directory("./user_assets");
     }
 
     for (int i = 0; i < count; i++) {
         fs::path sourcePath(paths[i]); 
-        fs::path destinationPath = fs::path(targetDir) / sourcePath.filename();
+        fs::path destinationPath = fs::path("./user_assets") / sourcePath.filename();
 
         try {
             fs::copy(sourcePath, destinationPath, fs::copy_options::overwrite_existing);
-            std::cout << "[Importacao] Arquivo copiado para: " << destinationPath.generic_string() << std::endl;
+            std::cout << "[Importacao] Arquivo copiado: " << destinationPath << std::endl;
         } catch (const fs::filesystem_error& e) {
             std::cerr << "[Erro] Falha ao copiar arquivo: " << e.what() << std::endl;
         }
     }
+#else
+    std::cout << "[Web] O Drag & Drop nativo de arquivos do SO não é suportado no navegador." << std::endl;
+#endif
 }
+
+#ifdef __EMSCRIPTEN__
+// Função chamada automaticamente pelo navegador ao redimensionar a tela
+EM_BOOL window_size_changed(int eventType, const EmscriptenUiEvent *uiEvent, void *userData) {
+    GLFWwindow* window = (GLFWwindow*)userData;
+    double width, height;
+    
+    // Pergunta ao HTML qual é o tamanho real do canvas na tela agora
+    emscripten_get_element_css_size("#canvas", &width, &height);
+
+    double pixel_ratio = emscripten_get_device_pixel_ratio();
+    
+    // Atualiza a janela "Mãe" (que segura o ImGui)
+    glfwSetWindowSize(window, (int)(width * pixel_ratio), (int)(height * pixel_ratio));
+    
+    return EM_TRUE;
+}
+#endif
 
 int main() {
     glfwInit();
@@ -117,10 +150,25 @@ int main() {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    GLFWwindow* window = glfwCreateWindow(1200, 800, "PolyDuck Engine", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(1920, 1080, "PolyDuck Engine", NULL, NULL);
     glfwMakeContextCurrent(window);
 
-    gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
+    #ifdef __EMSCRIPTEN__
+    // 1. Pega o tamanho do navegador na primeira vez que abre (evita aquele piscar distorcido)
+    double css_w, css_h;
+    emscripten_get_element_css_size("#canvas", &css_w, &css_h);
+    glfwSetWindowSize(window, (int)css_w, (int)css_h);
+
+    // 2. Avisa o Emscripten para chamar a nossa função quando a janela mudar
+    emscripten_set_resize_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, window, false, window_size_changed);
+    #endif
+
+    #ifndef __EMSCRIPTEN__
+        if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
+            std::cout << "Falha ao inicializar o GLAD" << std::endl;
+            return -1;
+        }
+    #endif
 
     GLFWimage images[1];
     // Coloque o caminho correto para a sua arte em pixel do Pateco!
@@ -179,7 +227,7 @@ int main() {
 
     glfwSetCursorPosCallback(window, mouse_callback);
     glfwSetDropCallback(window, drop_callback);
-    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+    glfwSetMouseButtonCallback(window, mouse_button_callback);
 
     // Vértices de um cubo simples de tamanho 1x1x1 (Apenas posições X, Y, Z)
     float skyboxVertices[] = {
@@ -283,8 +331,8 @@ int main() {
     unsigned int textureColorbuffer;
     glGenTextures(1, &textureColorbuffer);
     glBindTexture(GL_TEXTURE_2D, textureColorbuffer);
-    // Por enquanto, criamos do tamanho da janela (1200x800)
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 1200, 800, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+    // Por enquanto, criamos do tamanho da janela (1920x1080)
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 1920, 1080, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, textureColorbuffer, 0);
@@ -293,7 +341,7 @@ int main() {
     unsigned int rbo;
     glGenRenderbuffers(1, &rbo);
     glBindRenderbuffer(GL_RENDERBUFFER, rbo);
-    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, 1200, 800);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, 1920, 1080);
     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, rbo);
 
     if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
@@ -318,8 +366,11 @@ int main() {
     glGenTextures(1, &depthMap);
     glBindTexture(GL_TEXTURE_2D, depthMap);
     
-    // Perceba que usamos GL_DEPTH_COMPONENT em vez de GL_RGB, pois não queremos cores!
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, SHADOW_WIDTH, SHADOW_HEIGHT, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+    #ifdef __EMSCRIPTEN__
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, SHADOW_WIDTH, SHADOW_HEIGHT, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+    #else
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, SHADOW_WIDTH, SHADOW_HEIGHT, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+    #endif
     
     // 4. Configuração dos filtros de textura
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -327,18 +378,27 @@ int main() {
     
     // 5. CLAMP_TO_BORDER: Isso é crucial! Garante que as coisas que estão fora da 
     // "visão do Sol" não projetem uma sombra infinita esticada pelo cenário.
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-    float borderColor[] = { 1.0, 1.0, 1.0, 1.0 };
-    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
+    #ifdef __EMSCRIPTEN__
+    // WebGL não suporta borda customizada, usamos as bordas da própria imagem
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    #else
+        // Desktop continua usando a borda perfeita
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+        float borderColor[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+        glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
+    #endif
     
     // 6. Conecta a textura ao Framebuffer
     glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthMap, 0);
     
     // 7. Avisa explicitamente o OpenGL: "Não tente desenhar cores aqui!"
-    glDrawBuffer(GL_NONE);
-    glReadBuffer(GL_NONE);
+    #ifndef __EMSCRIPTEN__
+        glDrawBuffer(GL_NONE);
+        glReadBuffer(GL_NONE);
+    #endif
     
     // 8. Desliga o Framebuffer para não bagunçar o resto da inicialização
     glBindFramebuffer(GL_FRAMEBUFFER, 0); 
@@ -351,7 +411,7 @@ int main() {
     UIManager uiManager(window);
 
     // Loop de Renderização
-    while (!glfwWindowShouldClose(window)) {
+    std::function<void()> mainLoop = [&]() {
         float currentFrame = static_cast<float>(glfwGetTime());
         deltaTime = currentFrame - lastFrame;
         lastFrame = currentFrame;
@@ -363,8 +423,8 @@ int main() {
 
         uiManager.beginFrame();
 
-        static float lastViewportWidth = 1200.0f;
-        static float lastViewportHeight = 800.0f;
+        static float lastViewportWidth = 1920.0f;
+        static float lastViewportHeight = 1080.0f;
 
         // Se o usuário esticou ou encolheu a janela do ImGui...
         if (sceneState.viewportWidth != lastViewportWidth || sceneState.viewportHeight != lastViewportHeight) {
@@ -434,17 +494,6 @@ int main() {
         unshadedShader.use();
         unshadedShader.setMat4("projection", projection);
         unshadedShader.setMat4("view", view);
-
-        // A. Desenhar o Ground Plane como um Grid Verde
-        glm::mat4 groundModel = glm::mat4(1.0f);
-        groundModel = glm::translate(groundModel, glm::vec3(0.0f, -0.01f, 0.0f)); 
-        unshadedShader.setMat4("model", groundModel);
-        
-        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE); 
-        unshadedShader.setVec3("uColor", glm::vec3(0.1f, 0.1f, 0.1f)); 
-        groundPlane.draw();
-        
-        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL); // Reseta o preenchimento
 
         // B. Desenhar o Ponto Central (Origin Dot)
         glm::mat4 dotModel = glm::mat4(1.0f);
@@ -589,8 +638,21 @@ int main() {
 
         glfwSwapBuffers(window);
         glfwPollEvents();
-    }
+    };
 
+    #ifdef __EMSCRIPTEN__
+    // Na Web, entregamos a função para o Emscripten gerenciar os frames
+    emscripten_set_main_loop_arg([](void* arg) {
+        (*static_cast<std::function<void()>*>(arg))();
+    }, &mainLoop, 0, 1);
+    #else
+        // No Desktop, rodamos o while infinito clássico
+        while (!glfwWindowShouldClose(window)) {
+            mainLoop();
+        }
+    #endif
+
+    // Encerramento (só é chamado no Desktop quando o usuário fecha a janela)
     glfwTerminate();
     return 0;
 }

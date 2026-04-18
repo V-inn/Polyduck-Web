@@ -1,4 +1,6 @@
-#version 330 core
+#version 300 es
+precision highp float;
+
 out vec4 FragColor;
 
 in vec3 FragPos;
@@ -48,7 +50,9 @@ float ShadowCalculation(vec4 fragPosLightSpace, vec3 normal, vec3 lightDir) {
     projCoords = projCoords * 0.5 + 0.5;
     
     // Se o pixel estiver muito longe (fora do alcance do sol), força 0.0 (sem sombra)
-    if(projCoords.z > 1.0) return 0.0;
+    if(projCoords.z > 1.0 || projCoords.x < 0.0 || projCoords.x > 1.0 || projCoords.y < 0.0 || projCoords.y > 1.0) {
+        return 0.0; 
+    }
     
     float currentDepth = projCoords.z;
     
@@ -57,7 +61,7 @@ float ShadowCalculation(vec4 fragPosLightSpace, vec3 normal, vec3 lightDir) {
     
     // Fazemos uma média de 9 pixels vizinhos (PCF) para a sombra não ficar serrilhada
     float shadow = 0.0;
-    vec2 texelSize = 1.0 / textureSize(shadowMap, 0);
+    vec2 texelSize = 1.0 / vec2(textureSize(shadowMap, 0));
     for(int x = -1; x <= 1; ++x) {
         for(int y = -1; y <= 1; ++y) {
             float pcfDepth = texture(shadowMap, projCoords.xy + vec2(x, y) * texelSize).r; 

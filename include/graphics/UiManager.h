@@ -1,7 +1,11 @@
 #ifndef UIMANAGER_H
 #define UIMANAGER_H
 
+#ifdef __EMSCRIPTEN__
+#include <GLES3/gl3.h>
+#else
 #include <glad/glad.h>
+#endif
 #include <GLFW/glfw3.h>
 #include "SceneState.h"
 #include "scene/Scene.h"
